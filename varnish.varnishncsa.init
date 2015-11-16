@@ -2,7 +2,7 @@
 
 ### BEGIN INIT INFO
 # Provides:          varnishncsa
-# Required-Start:    $local_fs $remote_fs $network varnish
+# Required-Start:    $local_fs $remote_fs $network varnish $all
 # Required-Stop:     $local_fs $remote_fs $network varnish
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
@@ -14,35 +14,60 @@
 . /lib/lsb/init-functions
 
 NAME=varnishncsa
+SERVICE="$(basename ${0})"
+INSTANCE_LC=$(echo ${SERVICE#${NAME}-} | tr '-' '_' | tr '[:upper:]' '[:lower:]')
+INSTANCE_UC=$(echo ${INSTANCE_LC} | tr '[:lower:]' '[:upper:]')
 DESC="HTTP accelerator log deamon"
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/bin/$NAME
-PIDFILE=/run/$NAME/$NAME.pid
-LOGFILE=/var/log/varnish/varnishncsa.log
+PIDFILE=/var/run/${NAME}/${SERVICE}.pid
+LOGFILE=/var/log/varnish/${SERVICE}.log
 USER=varnishlog
-DAEMON_OPTS="-a -w ${LOGFILE} -D -P ${PIDFILE}"
+DAEMON_OPTS="-a -w ${LOGFILE} -D -P ${PIDFILE} ${DAEMON_OPTS}"
 
 # Include defaults if available
 if [ -f /etc/default/$NAME ] ; then
         . /etc/default/$NAME
+fi
+if [ "${NAME}" != "${SERVICE}" -a -f "/etc/default/${SERVICE}" ]; then
+	. /etc/default/$SERVICE
+fi
+
+if eval "test -n \"\$DAEMON_OPTS_${INSTANCE_UC}\""; then
+	DAEMON_OPTS="${DAEMON_OPTS} $(eval echo \$DAEMON_OPTS_${INSTANCE_UC})"
+fi
+
+if eval "test -n \"\$LOG_FORMAT_${INSTANCE_UC}\""; then
+	LOG_FORMAT="$(eval echo \$LOG_FORMAT_${INSTANCE_UC})"
 fi
 
 # If unset, or set to "0" or "no", exit
 if [ -z "${VARNISHNCSA_ENABLED}" ] || \
    [ "${VARNISHNCSA_ENABLED}" = "0" ] || \
    [ "${VARNISHNCSA_ENABLED}" = "no" ]; then
-  exit 0;
+	if [ "${NAME}" != "${SERVICE}" ]; then
+		echo "Please enable ${SERVICE} via either /etc/default/${NAME} or /etc/defaul/${SERVICE}"
+	else
+		echo "Please enable ${SERVICE} via either /etc/default/${NAME}"
+	fi
+	exit 0;
 fi
 
 test -x $DAEMON || { echo "${DAEMON} has no execute bit"; exit 0; }
+
+if [ "${INSTANCE_LC}" = "${NAME}" ]; then
+	DAEMON_OPTS="${DAEMON_OPTS} -n varnish"
+else
+	DAEMON_OPTS="${DAEMON_OPTS} -n ${INSTANCE_LC#${NAME}-}"
+fi
 
 start_varnishncsa() {
     output=$(/bin/tempfile -s.varnish)
     log_daemon_msg "Starting $DESC" "$NAME"
     create_pid_directory
     if start-stop-daemon --start --pidfile ${PIDFILE} \
-        --chuid $USER --exec ${DAEMON} -- ${DAEMON_OPTS} \
-        > ${output} 2>&1; then
+        --chuid $USER --exec ${DAEMON} -- ${DAEMON_OPTS} ${LOG_FORMAT:+-F "${LOG_FORMAT}"} \
+	> $output 2>&1; then
 	log_end_msg 0
     else
 	log_end_msg 1

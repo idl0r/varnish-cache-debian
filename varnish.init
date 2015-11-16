@@ -17,16 +17,32 @@
 . /lib/lsb/init-functions
 
 NAME=varnishd
+SERVICE="$(basename ${0})"
+# Too bad, the init script has been named "varnish" instead of "varnishd"
+INSTANCE_LC=$(echo ${SERVICE#varnish-} | tr '-' '_' | tr '[:upper:]' '[:lower:]')
+INSTANCE_UC=$(echo ${INSTANCE_LC} | tr '[:lower:]' '[:upper:]')
 DESC="HTTP accelerator"
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/sbin/varnishd
-PIDFILE=/run/$NAME.pid
+PIDFILE=/run/${SERVICE}.pid
 
 test -x $DAEMON || { echo "${DAEMON} has no execute bit"; exit 0; }
 
 # Include varnish defaults if available
 if [ -f /etc/default/varnish ] ; then
         . /etc/default/varnish
+fi
+
+# If it's not the default "varnish" service and we have a instance related config...
+# This will override possible defaults
+if [ "${SERVICE}" != "varnish" -a -f /etc/default/${SERVICE} ] ; then
+	. /etc/default/${SERVICE}
+fi
+
+# So one can use a global DAEMON_OPTS (/etc/default/varnish), DAEMON_OPTS from
+# /etc/default/$SERVICE or DAEMON_OPTS_FOOBAR from either one
+if eval "test -n \"\$DAEMON_OPTS_${INSTANCE_UC}\""; then
+	DAEMON_OPTS="$(eval echo \$DAEMON_OPTS_${INSTANCE_UC})"
 fi
 
 # Open files (usually 1024, which is way too small for varnish)
@@ -40,12 +56,15 @@ ulimit -l ${MEMLOCK:-82000}
 # installed application server.)
 DAEMON_OPTS=${DAEMON_OPTS:--b localhost}
 
+DAEMON_OPTS="${DAEMON_OPTS} -i ${INSTANCE_LC} -n /var/lib/varnish/${INSTANCE_LC}/"
+
 # Ensure we have a PATH
 export PATH="${PATH:+$PATH:}/usr/sbin:/usr/bin:/sbin:/bin"
 
 start_varnishd() {
     log_daemon_msg "Starting $DESC" "$NAME"
     output=$(/bin/tempfile -s.varnish)
+
     if start-stop-daemon \
         --start --pidfile ${PIDFILE} --exec ${DAEMON} -- \
         -P ${PIDFILE} ${DAEMON_OPTS} > ${output} 2>&1; then
@@ -61,6 +80,9 @@ start_varnishd() {
 disabled_varnishd() {
     log_daemon_msg "Not starting $DESC" "$NAME"
     log_progress_msg "disabled in /etc/default/varnish"
+    if [ "${SERVICE}" != "varnish" ]; then
+	    log_progress_msg "or /etc/default/${SERVICE}"
+    fi
     log_end_msg 0
 }
 

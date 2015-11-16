@@ -2,7 +2,7 @@
 
 ### BEGIN INIT INFO
 # Provides:          varnishlog
-# Required-Start:    $local_fs $remote_fs $network varnish
+# Required-Start:    $local_fs $remote_fs $network varnish $all
 # Required-Stop:     $local_fs $remote_fs $network varnish
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
@@ -14,27 +14,49 @@
 . /lib/lsb/init-functions
 
 NAME=varnishlog
+SERVICE="$(basename ${0})"
+INSTANCE_LC=$(echo ${SERVICE#${NAME}-} | tr '-' '_' | tr '[:upper:]' '[:lower:]')
+INSTANCE_UC=$(echo ${INSTANCE_LC} | tr '[:lower:]' '[:upper:]')
 DESC="HTTP accelerator log deamon"
 PATH=/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/bin/$NAME
-PIDFILE=/run/$NAME/$NAME.pid
-LOGFILE=/var/log/varnish/varnish.log
+PIDFILE=/var/run/${NAME}/${SERVICE}.pid
+LOGFILE=/var/log/varnish/${SERVICE}.log
 USER=varnishlog
-DAEMON_OPTS="-a -w ${LOGFILE} -D -P $PIDFILE"
+DAEMON_OPTS="-a -w ${LOGFILE} -D -P $PIDFILE ${DAEMON_OPTS}"
 
 # Include defaults if available
 if [ -f /etc/default/$NAME ] ; then
         . /etc/default/$NAME
 fi
 
+if [ "${NAME}" != "${SERVICE}" -a -f "/etc/default/${SERVICE}" ]; then
+       . /etc/default/$SERVICE
+fi
+
+if eval "test -n \"\$DAEMON_OPTS_${INSTANCE_UC}\""; then
+       DAEMON_OPTS="${DAEMON_OPTS} $(eval echo \$DAEMON_OPTS_${INSTANCE_UC})"
+fi
+
 # If unset, or set to "0" or "no", exit
 if [ -z "${VARNISHLOG_ENABLED}" ] || \
    [ "${VARNISHLOG_ENABLED}" = "0" ] || \
    [ "${VARNISHLOG_ENABLED}" = "no" ]; then
-  exit 0;
+	if [ "${NAME}" != "${SERVICE}" ]; then
+		echo "Please enable ${SERVICE} via either /etc/default/${NAME} or /etc/defaul/${SERVICE}"
+	else
+		echo "Please enable ${SERVICE} via either /etc/default/${NAME}"
+	fi
+	exit 0;
 fi
 
 test -x $DAEMON || { echo "${DAEMON} has no execute bit"; exit 0; }
+
+if [ "${INSTANCE_LC}" = "${NAME}" ]; then
+	DAEMON_OPTS="${DAEMON_OPTS} -n varnish"
+else
+	DAEMON_OPTS="${DAEMON_OPTS} -n ${INSTANCE_LC#${NAME}-}"
+fi
 
 start_varnishlog() {
     output=$(/bin/tempfile -s.varnish)
